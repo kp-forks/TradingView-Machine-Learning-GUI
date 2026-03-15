@@ -34,6 +34,8 @@ hyperview list-strategies
 
 You can also run via `python -m _engine` instead of `hyperview`.
 
+Python bytecode is redirected into the project-level `.pycache/` directory, so runtime imports do not create scattered `__pycache__` folders under `_engine/` or `strategy/`.
+
 ## How It Works
 
 1. **Download** — Connects to TradingView's websocket using your existing Firefox session cookies. Supports up to 40K historical bars on paid plans with automatic backfill.
@@ -258,37 +260,3 @@ The simulator approximates TradingView's intrabar fill behavior:
 - **Intrabar path**: If a bar opens closer to its high, path is `open → high → low → close`; closer to its low, path is `open → low → high → close`
 - **Position sizing**: 100% of equity per trade, no pyramiding
 - **SL/TP exits**: Checked against the intrabar price path within the same bar
-
-## TradingView Session Access
-
-The downloader reads credentials directly from your local Firefox profile -- no browser automation or API keys required:
-
-1. Locates your default Firefox profile via `profiles.ini`
-2. Extracts TradingView `session_id` from `cookies.sqlite` and `auth_token` from local storage
-3. Connects to the TradingView websocket (`prodata.tradingview.com`) with your authenticated session
-
-**Prerequisite**: You must be **logged into TradingView in Firefox** on the same machine.
-
-If Firefox credentials are unavailable, you can manually place a CSV file (with `time,open,high,low,close,volume` columns) in the cache directory as `{exchange}_{symbol}_{timeframe}.csv`.
-
-## Signal Logic (MACD-RSI Example)
-
-The included example strategy (matching [`macd_rsi_strategy.pine`](tv_strategies/pine/macd_rsi_strategy.pine)):
-
-- **Buy**: RSI was <= oversold (30) within the last 10 bars **AND** MACD line crosses above the signal line
-- **Sell**: RSI was >= overbought (70) within the last 10 bars **AND** MACD line crosses below the signal line
-
-Default parameters: RSI length 14, MACD fast 12 / slow 26 / signal 9.
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `pandas` | DataFrames and time-series operations |
-| `numpy` | Numerical indicator computations |
-| `websocket-client` | TradingView websocket connection |
-| `optuna` | Bayesian hyper-optimization (TPE sampler) |
-
-## License
-
-[MIT License](LICENSE)
