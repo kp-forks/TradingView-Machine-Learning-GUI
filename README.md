@@ -1,86 +1,293 @@
-# TradingView Machine Learning GUI
+# HyperView
 
-## Project Overview
+A CLI-driven TradingView strategy backtester and hyper-optimizer. Downloads historical candle data through the TradingView websocket, runs pluggable strategies in pure Python backed by [TA-Lib](https://github.com/TA-Lib/ta-lib-python) (150+ indicators), and optimizes SL/TP parameters via grid search or Bayesian (Optuna TPE) — all from a single `hyperview` command.
 
-This project primarily features a stop loss/take profit generator capable of determining the optimal parameters for your TradingView strategy. Additionally, it incorporates machine learning algorithms, using sklearn, to hyper-optimize your TradingView strategy. The project includes a comprehensive range of ratios, such as Sharpe, Sortino, Calmar, Information, Treynor, and Max Profit, providing a multifaceted approach to strategy optimization. Another key feature is the next-day closing price predictor, a script that empowers you to forecast the following day's closing price accurately. Please refer to the machine learning directory to access the stored pictures or examine the comments in the source code for a clearer understanding. To ensure user-friendliness and accessibility for traders of all expertise levels, the project includes a Graphical User Interface (GUI). [Here is live example of TradeView](https://vimeo.com/594037879)
+## Prerequisites
 
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/16ab9d3fae94258a715965e271d5c80b6517051c/pictures/TradeViewGUI.png)
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/16ab9d3fae94258a715965e271d5c80b6517051c/pictures/TradeViewResultsExample.png)
+- **Python 3.11+**
+- **TA-Lib** — pre-built wheels ship for Python 3.9–3.14 on Windows, macOS, and Linux:
+  ```bash
+  pip install TA-Lib
+  ```
+- **Firefox** — TradingView authentication reads session cookies from your local Firefox profile. Log in to [tradingview.com](https://www.tradingview.com) in Firefox before downloading data.
 
-## Disclaimer
+## Quick Start
 
-This software is for educational purposes only. Do not risk money which
-you are afraid to lose. USE THE SOFTWARE AT YOUR OWN RISK. THE AUTHORS
-AND ALL AFFILIATES ASSUME NO RESPONSIBILITY FOR YOUR TRADING RESULTS.
+```bash
+# Install in editable mode (creates the `hyperview` CLI command)
+pip install -e .
 
-We strongly recommend you to have coding and Python knowledge. Do not
-hesitate to read the source code and understand the mechanism of this bot.
+# Download data for one or more pairs
+hyperview download-data --pairs NFLX AAPL --exchange NASDAQ --timeframe 1h --start 2023-01-03 --session extended
 
-## Installation Instructions
+# Run a single backtest
+hyperview backtest --symbol NFLX --exchange NASDAQ --timeframe 1h --sl 3.23 --tp 13.06 --mode long --start 2023-01-03
 
-#1. Download Firefox, and TradingView_Machine_Learning folder here.
+# Hyper-optimize SL/TP (uses config.json defaults for ranges if not specified)
+hyperview hyperopt --symbol NFLX --exchange NASDAQ --timeframe 1h --start 2023-01-03
 
-[FireFox](https://www.mozilla.org/en-US/firefox/new/)
+# List cached data and registered strategies
+hyperview list-data
+hyperview list-strategies
+```
 
-[TradingView_Machine Learning](https://github.com/TreborNamor/TradingView_Machine_Learning/archive/master.zip)
+You can also run via `python -m _engine` instead of `hyperview`.
 
-#2. Extract zip file to Desktop and Execute TradeViewGUI.exe file.
+## How It Works
 
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/bd4a703fb0b3ec964c305dd7c720b17b111535fc/pictures/extractZip.png)
+1. **Download** — Connects to TradingView's websocket using your existing Firefox session cookies. Supports up to 10K historical bars on paid plans with automatic backfill.
+2. **Signal** — Runs a pluggable strategy (e.g. the included MACD+RSI or ADX+Stochastic) in pure Python with TA-Lib indicator parity.
+3. **Backtest** — Simulates trades bar-by-bar using TradingView-parity fill assumptions (next-bar-open entry, intrabar SL/TP exit ordering).
+4. **Hyper-Optimize** — Runs coarse+fine grid search or Bayesian TPE across SL/TP combinations, ranking by your chosen objective.
 
-#3. Copy and Paste Firefox Profile Path to App.
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/16ab9d3fae94258a715965e271d5c80b6517051c/pictures/FindFirefoxPath.png)
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/bd4a703fb0b3ec964c305dd7c720b17b111535fc/pictures/addPath.png)
+## Repository Layout
 
-#4. Inside Firefox, login into your TradingView profile. Go to your TradingView chart and add the TradingView strategy you want to optimize. When you add the strategy to chart make sure to press CTRL + S on your keyboard to save your chart. I have a TradingView Strategy that is ready to use. You can browse the strategy source code [here.](https://github.com/TreborNamor/TradingView-Machine-Learning-GUI/blob/master/tv_strategies/MACD-RSI%20%20Strategy)
-If you want to create a custom TradingView Strategy click [here.](https://github.com/TreborNamor/TradingView-Machine-Learning-GUI/blob/master/tv_strategies/Create%20Your%20Own%20Strategy%20For%20Optimization.txt)
-![image](https://github.com/TreborNamor/TradingView-Machine-Learning-GUI/blob/cee46135f1f0d8656c9f1614abb334d8205a6110/pictures/addStrategy.png)
+```
+pyproject.toml                    Package metadata & `hyperview` CLI entry point
+config.json                       Default configuration (exchange, timeframe, opt ranges)
+data/                             Cached candle data (CSV, auto-generated)
+results/                          Optimization & backtest results (auto-generated)
+strategy/                         Pluggable strategy framework (user-facing)
+├── __init__.py                   Plugin registry & auto-discovery
+├── macd_rsi.py                   MACD+RSI strategy (registered as "macd_rsi")
+├── adx_stochastic.py             ADX+Stochastic strategy (registered as "adx_stochastic")
+└── _lib/                         Shared strategy library
+    ├── base.py                   BaseStrategy ABC & prepare_candles()
+    └── indicators.py             TA-Lib wrappers, conversion helpers & signal toolkit
+_engine/                          Internal processing logic
+├── __main__.py                   Module entry point (python -m _engine)
+├── cli/                          CLI router & subcommand handlers
+│   ├── backtest.py               backtest command
+│   ├── download.py               download-data command
+│   ├── hyperopt.py               hyperopt command
+│   └── list.py                   list-data & list-strategies commands
+├── config.py                     Config loader (JSON merged with CLI overrides)
+├── models.py                     Shared dataclasses (CandleRequest, Trade, BacktestMetrics, …)
+├── backtest/
+│   └── engine.py                 TradingView-parity OHLC simulator
+├── downloader/
+│   ├── client.py                 TradingView websocket downloader & multi-pair support
+│   └── _tv/                      WebSocket internals (session, protocol, cache, credentials)
+└── hyperopt/
+    └── optimizer.py              Grid search + Bayesian (Optuna TPE)
+```
 
-#5. Enter Your long and short parameters and click Run button.
-![image](https://github.com/TreborNamor/TradingView_Machine_Learning/blob/bd4a703fb0b3ec964c305dd7c720b17b111535fc/pictures/parameters.png)
+## Configuration
 
-## Tips:
-- CheckBox: You can hide Firefox browser when checkbox is enabled.
-- Minimum Long Stoploss: The minimum percentage you are willing to risk for your strategy. For example, a 1% minimum risk.
-- Maximum Long Stoploss: The maximum percentage you are willing to risk for your strategy. For example, a 30% maximum risk.
-- Minimum Long Takeprofit: The minimum percentage you are willing to risk for your strategy. For example, a 1% minimum risk.
-- Maximum Long Takeprofit: The maximum percentage you are willing to risk for your strategy. For example, a 30% maximum risk.
--Long Increment: When option is available, do you want the strategy to increment in steps of 1 or .1 during parameter search. (Default is set to .1)
+HyperView loads defaults from `config.json` at the project root. CLI flags always override config values.
 
-- Minimum Short Stoploss: The minimum percentage you are willing to risk for your strategy. For example, a 1% minimum risk.
-- Maximum Short Stoploss: The maximum percentage you are willing to risk for your strategy. For example, a 30% maximum risk.
-- Minimum Short Takeprofit: The minimum percentage you are willing to risk for your strategy. For example, a 1% minimum risk.
-- Maximum Short Takeprofit: The maximum percentage you are willing to risk for your strategy. For example, a 30% maximum risk.
-- Short Increment: When option is available, do you want the strategy to increment in steps of 1 or .1 during parameter search. (Default is set to .1)
+```json
+{
+    "exchange": "NASDAQ",
+    "timeframe": "1h",
+    "session": "extended",
+    "adjustment": "splits",
+    "strategy": "macd_rsi",
+    "initial_capital": 100000,
+    "data_dir": "data",
+    "output_dir": "results",
+    "optimization": {
+        "search_method": "bayesian",
+        "n_trials": 200,
+        "objective": "net_profit_pct",
+        "top_n": 10,
+        "fine_factor": 2,
+        "sl_range": { "min": 1.0, "max": 15.0, "step": 0.5 },
+        "tp_range": { "min": 1.0, "max": 15.0, "step": 0.5 }
+    }
+}
+```
 
-- Decimal Place: When option is available, by what decimal place would you like during strategy search. (Default is set to 1)
-- Max Attempts: What is the maximum amount of attempts would you like the strategy try. (Default is set to 30)
-- Firefox Path: The path used to run selenium webdriver.
+Use `--config /path/to/custom.json` to load a different file.
 
-## Contributing
+## CLI Reference
 
-We welcome contributions from the community. If you wish to contribute:
+### `download-data` — Fetch Candle Data
 
-1. Fork the repository.
-2. Create a new branch for your changes.
-3. Make the changes/additions.
-4. Commit your changes.
-5. Push the changes to your forked repository.
-6. Open a pull request from your forked repository to this repository.
+```bash
+hyperview download-data --pairs NFLX AAPL TSLA --exchange NASDAQ --timeframe 1h --start 2023-01-03
+```
 
-Please ensure your code adheres to our coding standards and passes all tests before submitting a pull request.
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--pairs` | Yes | — | One or more ticker symbols |
+| `--exchange` | No | config | Exchange (e.g. `NASDAQ`, `BITSTAMP`) |
+| `--timeframe` | No | config | Bar interval: `1m` `5m` `15m` `1h` `4h` `1d` etc. |
+| `--start` / `--end` | No | — | Date range (ISO format) |
+| `--session` | No | config | `regular` or `extended` |
+| `--adjustment` | No | config | Price adjustment (`splits`, `dividends`, `none`) |
+
+### `backtest` — Single Strategy Evaluation
+
+```bash
+hyperview backtest --symbol NFLX --sl 5.0 --tp 5.0 --mode long --start 2023-01-03
+```
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--symbol` | Yes | — | Ticker symbol |
+| `--sl` | Yes | — | Stop-loss % |
+| `--tp` | Yes | — | Take-profit % |
+| `--strategy` | No | config | Strategy name (e.g. `macd_rsi`, `adx_stochastic`) |
+| `--mode` | No | `long` | `long`, `short`, or `both` |
+| `--exchange`, `--timeframe`, `--session`, `--start`, `--end` | No | config | Standard filters |
+
+### `hyperopt` — Hyper-Optimize SL/TP
+
+```bash
+hyperview hyperopt --symbol NFLX --search-method bayesian --n-trials 300
+```
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--symbol` | Yes | — | Ticker symbol |
+| `--sl-min/max/step` | No | config | Stop-loss % search range |
+| `--tp-min/max/step` | No | config | Take-profit % search range |
+| `--search-method` | No | config | `grid` or `bayesian` |
+| `--n-trials` | No | config | Bayesian trial count |
+| `--objective` | No | config | `net_profit_pct` `profit_factor` `win_rate_pct` `max_drawdown_pct` `trade_count` |
+| `--top-n` | No | config | Number of top candidates to keep |
+| `--strategy`, `--mode`, `--exchange`, `--timeframe`, etc. | No | config | Standard filters |
+
+### `list-data` — Show Cached Datasets
+
+```bash
+hyperview list-data
+```
+
+### `list-strategies` — Show Available Strategies
+
+```bash
+hyperview list-strategies
+```
+
+## Indicators
+
+HyperView ships with **20 wrapped indicators** backed by TA-Lib, plus **4 signal helpers**. You also have direct access to all **150+ TA-Lib functions** via the `to_numpy` / `wrap` conversion helpers.
+
+### Wrapped Indicators
+
+| Category | Functions |
+|----------|-----------|
+| **Moving Averages** | `ema`, `sma`, `wma` |
+| **Momentum** | `rsi`, `macd`, `stochastic`, `stochastic_rsi`, `cci`, `williams_r`, `momentum`, `roc` |
+| **Trend** | `adx` (returns ADX, +DI, −DI), `aroon` (returns down, up), `psar` |
+| **Volatility** | `atr`, `bollinger_bands` (returns upper, middle, lower) |
+| **Volume** | `obv`, `mfi`, `ad`, `vwap` |
+
+### Signal Helpers
+
+| Function | Description |
+|----------|-------------|
+| `crossed_above(a, b)` | True on bars where `a` crosses above `b` |
+| `crossed_below(a, b)` | True on bars where `a` crosses below `b` |
+| `barssince(cond)` | Bars since condition was last True |
+| `to_unix_timestamp(dt)` | Convert ISO date string to UTC unix timestamp |
+
+### Using TA-Lib Directly
+
+For any of TA-Lib's 150+ functions not wrapped above, call `talib` directly and use the conversion helpers:
+
+```python
+import talib
+from strategy._lib.indicators import to_numpy, wrap
+
+df["cci"] = wrap(talib.CCI(to_numpy(df["high"]),
+                            to_numpy(df["low"]),
+                            to_numpy(df["close"]), timeperiod=20), df.index)
+```
+
+## Adding Custom Strategies
+
+1. Create a new file in `strategy/` (e.g. `my_strategy.py`)
+2. Subclass `BaseStrategy` and implement `generate_signals()`, `default_settings()`, `required_columns()`
+3. Decorate the class with `@register_strategy`
+
+Strategies are auto-discovered at startup — no manual imports needed.
+
+```python
+from strategy import register_strategy
+from strategy._lib.base import BaseStrategy
+from strategy._lib.indicators import ema, crossed_above
+
+@register_strategy
+class MyStrategy(BaseStrategy):
+    strategy_name = "my_strategy"
+
+    def default_settings(self):
+        return {"fast_period": 10, "slow_period": 20}
+
+    def required_columns(self):
+        return ["time", "open", "high", "low", "close"]
+
+    def generate_signals(self, candles, settings):
+        df = self.prepare_candles(candles)
+
+        fast = ema(df["close"], settings["fast_period"])
+        slow = ema(df["close"], settings["slow_period"])
+
+        df["buy_signal"] = crossed_above(fast, slow)
+        df["sell_signal"] = crossed_above(slow, fast)
+        df["in_date_range"] = True
+        df["enable_long"] = True
+        df["enable_short"] = False
+
+        return df
+```
+
+Then use it: `hyperview backtest --symbol NFLX --strategy my_strategy --sl 5 --tp 5`
+
+## Output Files
+
+Hyperopt writes a JSON file to `results/`:
+
+```
+results/macd_rsi_NASDAQ_NFLX_1h_long.json
+```
+
+The filename encodes `{strategy}_{exchange}_{symbol}_{timeframe}_{mode}` so each
+combination produces its own file. The JSON contains the full request parameters,
+ranked results, and coarse grid results (grid mode only).
+
+## Backtest Assumptions
+
+The simulator approximates TradingView's intrabar fill behavior:
+
+- **Entry**: Signal-generated market orders fill on the **next bar open**
+- **Intrabar path**: If a bar opens closer to its high, path is `open → high → low → close`; closer to its low, path is `open → low → high → close`
+- **Position sizing**: 100% of equity per trade, no pyramiding
+- **SL/TP exits**: Checked against the intrabar price path within the same bar
+
+## TradingView Session Access
+
+The downloader reads credentials directly from your local Firefox profile -- no browser automation or API keys required:
+
+1. Locates your default Firefox profile via `profiles.ini`
+2. Extracts TradingView `session_id` from `cookies.sqlite` and `auth_token` from local storage
+3. Connects to the TradingView websocket (`prodata.tradingview.com`) with your authenticated session
+
+**Prerequisite**: You must be **logged into TradingView in Firefox** on the same machine.
+
+If Firefox credentials are unavailable, you can manually place a CSV file (with `time,open,high,low,close,volume` columns) in the cache directory as `{exchange}_{symbol}_{timeframe}.csv`.
+
+## Signal Logic (MACD-RSI Example)
+
+The included example strategy (matching [`macd_rsi_strategy.pine`](tv_strategies/pine/macd_rsi_strategy.pine)):
+
+- **Buy**: RSI was <= oversold (30) within the last 10 bars **AND** MACD line crosses above the signal line
+- **Sell**: RSI was >= overbought (70) within the last 10 bars **AND** MACD line crosses below the signal line
+
+Default parameters: RSI length 14, MACD fast 12 / slow 26 / signal 9.
+
+## Dependencies
+
+| Package | Purpose |
+|---------|---------|
+| `pandas` | DataFrames and time-series operations |
+| `numpy` | Numerical indicator computations |
+| `websocket-client` | TradingView websocket connection |
+| `optuna` | Bayesian hyper-optimization (TPE sampler) |
 
 ## License
 
-This project is licensed under the [MIT License](https://github.com/TreborNamor/TradingView-Machine-Learning-GUI/blob/master/LICENSE). 
-
-## Contact Information
-
-For any questions, feedback, or discussions, feel free to reach out to me:
-
-- Email: robertroman7@gmail.com
-- LinkedIn: [Profile](https://www.linkedin.com/in/robert-roman7/)
-
-## Acknowledgements
-
-Thanks to all contributors and users for making this project possible. If you find this project helpful, please consider starring the repository to show your support.
+[MIT License](LICENSE)

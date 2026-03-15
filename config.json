@@ -1,0 +1,27 @@
+{
+    "exchange": "NASDAQ",
+    "timeframe": "1h",
+    "session": "extended",
+    "adjustment": "splits",
+    "strategy": "macd_rsi",
+    "initial_capital": 100000,
+    "data_dir": "data",
+    "output_dir": "results",
+    "optimization": {
+        "search_method": "bayesian",
+        "n_trials": 200,
+        "objective": "net_profit_pct",
+        "top_n": 10,
+        "fine_factor": 2,
+        "sl_range": {
+            "min": 1.0,
+            "max": 15.0,
+            "step": 0.5
+        },
+        "tp_range": {
+            "min": 1.0,
+            "max": 15.0,
+            "step": 0.5
+        }
+    }
+}
