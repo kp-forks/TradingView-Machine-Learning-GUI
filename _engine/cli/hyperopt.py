@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import logging
 from pathlib import Path
-from typing import Any
+
+from rich.console import Console
+from rich.panel import Panel
 
 from ..models import BacktestMetrics, CandleRequest, OptimizationRequest
 from ..presets import save_best_preset, strategy_preset_path
@@ -13,23 +15,16 @@ from strategy import list_strategies
 from ..hyperopt import run_optimization
 
 
-def _signal_density_suffix(signal_frame: Any) -> str:
-    """Return a density string fragment like ' | High density (86.98/1k bars)'."""
-    buy_count = int(signal_frame["buy_signal"].sum())
-    sell_count = int(signal_frame["sell_signal"].sum())
-    total_signals = buy_count + sell_count
-    in_range_bars = int(signal_frame["in_date_range"].sum())
-
+def _signal_density_suffix(total_signals: int, in_range_bars: int) -> str:
+    """Return a density label like 'High density (86.98/1k bars)'."""
     density_per_1k = (total_signals / max(in_range_bars, 1)) * 1000
-
     if density_per_1k < 5:
-        density_label = "Low"
+        label = "Low"
     elif density_per_1k < 20:
-        density_label = "Medium"
+        label = "Medium"
     else:
-        density_label = "High"
-
-    return f" | {density_label} density ({density_per_1k:.2f}/1k bars)"
+        label = "High"
+    return f"{label} density ({density_per_1k:.2f}/1k bars)"
 
 
 def _run_single_hyperopt(
@@ -84,10 +79,9 @@ def _run_single_hyperopt(
 
         buy_count = int(signal_frame["buy_signal"].sum())
         sell_count = int(signal_frame["sell_signal"].sum())
-        density = _signal_density_suffix(signal_frame)
-        print(f"   \u2022 Signals : {buy_count} buy / {sell_count} sell ({density.lstrip(' | ')})")
-
-        request = OptimizationRequest(
+        in_range_bars = int(signal_frame["in_date_range"].sum())
+        density = _signal_density_suffix(buy_count + sell_count, in_range_bars)
+        print(f"   \u2022 Signals : {buy_count} buy / {sell_count} sell ({density})")
             candle_request=candle_request,
             mode=mode,
             objective=objective,
@@ -132,8 +126,7 @@ def _run_single_hyperopt(
             search_method=search_method,
             best_metrics=best,
         )
-        from rich.console import Console as _Con
-        _Con().print(f"   [green]✔[/green] Best preset saved to: {preset_path}")
+        Console().print(f"   [green]✔[/green] Best preset saved to: {preset_path}")
         return 0, (best.sl_pct, best.tp_pct)
 
     except Exception as e:
@@ -180,8 +173,6 @@ def run_hyperopt(args: argparse.Namespace, config: dict) -> int:
         print("Error: No trading pairs resolved. Please check your config or arguments.")
         return 1
 
-    from rich.console import Console
-    from rich.panel import Panel
     console = Console()
 
     header_text = (

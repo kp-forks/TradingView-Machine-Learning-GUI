@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 import sys
 import time
 from pathlib import Path
@@ -156,12 +157,9 @@ class _Optimizer:
         results: list[BacktestMetrics] = []
         total = len(sl_values) * len(tp_values)
         start_time = time.time()
-        count = 0
-        for sl_value in sl_values:
-            for tp_value in tp_values:
-                results.append(self._evaluate_metrics(mode, sl_value, tp_value))
-                count += 1
-                _print_progress(count, total, start_time, phase)
+        for count, (sl_value, tp_value) in enumerate(itertools.product(sl_values, tp_values), start=1):
+            results.append(self._evaluate_metrics(mode, sl_value, tp_value))
+            _print_progress(count, total, start_time, phase)
         return _rank_results(results, objective)
 
     def _evaluate_metrics(self, mode: Mode, sl_value: float, tp_value: float) -> BacktestMetrics:
@@ -299,7 +297,6 @@ class _MultiPairOptimizer:
         direction = "minimize" if minimize else "maximize"
         study = optuna.create_study(direction=direction, sampler=optuna.samplers.TPESampler(seed=42))
 
-        # Recompute aggregate objective for ranking after the study
         study.optimize(objective, n_trials=n_trials)
 
         ranked = _deduplicate_and_rank_multi(all_candidates, objective_name)
@@ -325,13 +322,10 @@ class _MultiPairOptimizer:
         candidates: list[MultiPairCandidate] = []
         total = len(sl_values) * len(tp_values)
         start_time = time.time()
-        count = 0
-        for sl_value in sl_values:
-            for tp_value in tp_values:
-                candidate = self._evaluate_candidate(mode, sl_value, tp_value, objective)
-                candidates.append(candidate)
-                count += 1
-                _print_progress(count, total, start_time, phase)
+        for count, (sl_value, tp_value) in enumerate(itertools.product(sl_values, tp_values), start=1):
+            candidate = self._evaluate_candidate(mode, sl_value, tp_value, objective)
+            candidates.append(candidate)
+            _print_progress(count, total, start_time, phase)
         return _rank_multi_candidates(candidates, objective)
 
 
@@ -422,15 +416,13 @@ def _build_candidate(
     # Compute aggregate objective value
     if request_objective == "max_drawdown_pct":
         agg_obj = worst_dd
-    elif request_objective == "net_profit_pct":
-        agg_obj = avg_net
     elif request_objective == "profit_factor":
         agg_obj = sum(m.profit_factor for m in per_pair) / n
     elif request_objective == "win_rate_pct":
         agg_obj = sum(m.win_rate_pct for m in per_pair) / n
     elif request_objective == "trade_count":
         agg_obj = sum(m.trade_count for m in per_pair) / n
-    else:
+    else:  # "net_profit_pct" or None → default
         agg_obj = avg_net
 
     return MultiPairCandidate(
@@ -441,6 +433,8 @@ def _build_candidate(
         aggregate_objective=agg_obj,
         per_pair_metrics=per_pair,
     )
+
+
 def _multi_objective_value(candidate: MultiPairCandidate, objective: Objective) -> float:
     """Return the sortable objective value for a multi-pair candidate."""
     if objective == "max_drawdown_pct":

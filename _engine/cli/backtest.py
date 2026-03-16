@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import time
 import logging
+import time
+from pathlib import Path
+
+from rich.console import Console
 
 from .._utils import _format_time, build_risk
 from ..models import BacktestMetrics, BacktestResult, CandleRequest
@@ -130,7 +133,6 @@ def run_backtest(args: argparse.Namespace, config: dict) -> int:
         elif args.sl is None or args.tp is None:
             risk_source = "CLI/preset-file mixed fallback"
 
-    from rich.console import Console
     console = Console()
 
     line = "─" * 72
@@ -226,8 +228,6 @@ def _resolve_preset_file_path(
     strategy_name: str,
 ) -> None:
     """Resolve --preset-file to an absolute path, falling back to the output dir."""
-    from pathlib import Path
-
     if args.preset_file is not None:
         # If it's a bare filename (no directory separators), look in output_dir
         given = Path(args.preset_file)

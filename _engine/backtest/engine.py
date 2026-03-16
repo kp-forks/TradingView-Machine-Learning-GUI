@@ -28,18 +28,14 @@ _BARS_PER_YEAR: dict[str, float] = {
 
 def _annualization_factor(timeframe: str) -> float:
     """Return sqrt(bars-per-year) for Sharpe annualization."""
-    # Timeframe strings: "1h" → "60", "4h" → "240", "1D", "1W", "1M",
-    # or raw minute strings like "60", "240".
+    # Normalize aliases: "1h" → "60", "4h" → "240"; raw strings pass through.
     tf = timeframe.upper().replace(" ", "")
-    # Convert common aliases: "1H" → "60", "4H" → "240", etc.
     if tf.endswith("H"):
-        hours = tf[:-1]
         try:
-            tf = str(int(hours) * 60)
+            tf = str(int(tf[:-1]) * 60)
         except ValueError:
             pass
-    bars = _BARS_PER_YEAR.get(tf, 365 * 24)  # default to 1h
-    return math.sqrt(bars)
+    return math.sqrt(_BARS_PER_YEAR.get(tf, 365 * 24))  # default to 1h
 
 
 @dataclass
@@ -132,8 +128,7 @@ class _MetricsAccumulator:
             self.loss_return_sum += trade.return_pct
             self.loss_return_count += 1
             self.current_consec_losses += 1
-            if self.current_consec_losses > self.max_consec_losses:
-                self.max_consec_losses = self.current_consec_losses
+            self.max_consec_losses = max(self.max_consec_losses, self.current_consec_losses)
 
         if trade.exit_reason == "stop_loss":
             self.sl_exits += 1
@@ -231,20 +226,29 @@ class TradingViewLikeBacktester:
         equity_curve: list[float] = [equity] if include_details else []
         trades: list[Trade] = [] if include_details else []
 
-        for index in range(signal_frame.length):
-            bar_time = int(signal_frame.time[index])
-            open_price = float(signal_frame.open[index])
-            high_price = float(signal_frame.high[index])
-            low_price = float(signal_frame.low[index])
-            close_price = float(signal_frame.close[index])
+        # Pre-convert arrays to Python lists once: avoids per-bar numpy scalar overhead
+        length = signal_frame.length
+        times = signal_frame.time.tolist()
+        opens = signal_frame.open.tolist()
+        highs = signal_frame.high.tolist()
+        lows = signal_frame.low.tolist()
+        closes = signal_frame.close.tolist()
+        in_date_range_list = signal_frame.in_date_range.tolist()
+        buy_signals = signal_frame.buy_signal.tolist()
+        sell_signals = signal_frame.sell_signal.tolist()
+        enable_longs = signal_frame.enable_long.tolist()
+        enable_shorts = signal_frame.enable_short.tolist()
+        last_index = length - 1
+
+        for index in range(length):
+            bar_time = times[index]
+            open_price = opens[index]
+            high_price = highs[index]
+            low_price = lows[index]
+            close_price = closes[index]
 
             position, equity, filled_trade = self._apply_pending_order(
-                position,
-                pending,
-                bar_time,
-                open_price,
-                risk,
-                equity,
+                position, pending, bar_time, open_price, risk, equity,
             )
             pending = None
             if filled_trade is not None:
@@ -254,7 +258,7 @@ class TradingViewLikeBacktester:
 
             if position is not None:
                 exit_price, exit_reason = self._check_bar_exit(position, open_price, high_price, low_price, close_price)
-                if exit_price is not None and exit_reason is not None:
+                if exit_price is not None:
                     trade, equity = self._close_position(position, bar_time, exit_price, exit_reason, equity)
                     stats.record_trade(trade)
                     if include_details:
@@ -266,17 +270,17 @@ class TradingViewLikeBacktester:
             if include_details:
                 equity_curve.append(curve_value)
 
-            pending = self._build_next_order(
-                in_date_range=bool(signal_frame.in_date_range[index]),
-                buy_signal=bool(signal_frame.buy_signal[index]),
-                sell_signal=bool(signal_frame.sell_signal[index]),
-                enable_long=bool(signal_frame.enable_long[index]),
-                enable_short=bool(signal_frame.enable_short[index]),
-                close_price=close_price,
-                mode=mode,
-            )
-            if pending is not None and index == signal_frame.length - 1:
-                pending = None
+            # Skip building a pending order on the last bar — it can never be filled
+            if index < last_index:
+                pending = self._build_next_order(
+                    in_date_range=in_date_range_list[index],
+                    buy_signal=buy_signals[index],
+                    sell_signal=sell_signals[index],
+                    enable_long=enable_longs[index],
+                    enable_short=enable_shorts[index],
+                    close_price=close_price,
+                    mode=mode,
+                )
 
         metrics = self._build_metrics(stats, risk, mode, signal_frame.end_date)
         return metrics, trades, equity_curve
@@ -336,24 +340,27 @@ class TradingViewLikeBacktester:
         low_price: float,
         close_price: float,
     ) -> tuple[float | None, str | None]:
-        if abs(open_price - high_price) <= abs(open_price - low_price):
-            path = [open_price, high_price, low_price, close_price]
-        else:
-            path = [open_price, low_price, high_price, close_price]
+        sl = position.stop_price
+        tp = position.target_price
 
-        reason_by_price = {
-            position.stop_price: "stop_loss",
-            position.target_price: "take_profit",
-        }
+        # Approximate intrabar path: high before low when open is nearer to high
+        if abs(open_price - high_price) <= abs(open_price - low_price):
+            path = (open_price, high_price, low_price, close_price)
+        else:
+            path = (open_price, low_price, high_price, close_price)
 
         for start, end in zip(path, path[1:]):
-            lower, upper = sorted((start, end))
-            hits = [price for price in reason_by_price if lower <= price <= upper]
-            if not hits:
+            lo = min(start, end)
+            hi = max(start, end)
+            sl_hit = lo <= sl <= hi
+            tp_hit = lo <= tp <= hi
+            if not (sl_hit or tp_hit):
                 continue
-
-            first_hit = min(hits) if end >= start else max(hits)
-            return first_hit, reason_by_price[first_hit]
+            if sl_hit and tp_hit:
+                # Both levels in range: return whichever is encountered first
+                first_hit = min(sl, tp) if end >= start else max(sl, tp)
+                return first_hit, "stop_loss" if first_hit == sl else "take_profit"
+            return (sl, "stop_loss") if sl_hit else (tp, "take_profit")
 
         return None, None
 
@@ -422,10 +429,12 @@ class TradingViewLikeBacktester:
         end_date: str | None,
     ) -> BacktestMetrics:
         win_rate = (stats.wins / stats.trade_count * 100.0) if stats.trade_count else 0.0
-        if stats.negative_pnl == 0.0:
-            profit_factor = float("inf") if stats.positive_pnl > 0.0 else 0.0
+        if stats.positive_pnl <= 0.0:
+            profit_factor = 0.0
+        elif stats.negative_pnl == 0.0:
+            profit_factor = float("inf")
         else:
-            profit_factor = stats.positive_pnl / abs(stats.negative_pnl) if stats.positive_pnl > 0.0 else 0.0
+            profit_factor = stats.positive_pnl / abs(stats.negative_pnl)
 
         sl_pct = risk.long_stoploss_pct if mode != "short" else risk.short_stoploss_pct
         tp_pct = risk.long_takeprofit_pct if mode != "short" else risk.short_takeprofit_pct

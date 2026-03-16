@@ -8,7 +8,7 @@ import pandas as pd
 
 from .._utils import _format_time
 from ..downloader import TradingViewDataClient
-from strategy import get_strategy
+from strategy import get_strategy, BaseStrategy
 
 if TYPE_CHECKING:
     from ..models import CandleRequest
@@ -88,7 +88,7 @@ def generate_signals(
     quiet: bool = False,
     compact: bool = False,
     density_suffix: str = "",
-) -> tuple[pd.DataFrame, "get_strategy"]:
+) -> tuple[pd.DataFrame, BaseStrategy]:
     """Instantiate strategy, generate signals, and print progress."""
     if not quiet and not compact:
         print(f"\n[{step}] Generating signals...")
@@ -200,9 +200,9 @@ def _arrow(value: float, fmt: str = ".1f", *, pct: bool = True, invert: bool = F
         drawdown / worst-trade where the value is already negative or represents loss.
     """
     suffix = "%" if pct else ""
-    formatted = f"{value:{fmt}}{suffix}"
     if invert:
         return f"[red]▼ {abs(value):{fmt}}{suffix}[/red]"
+    formatted = f"{value:{fmt}}{suffix}"
     if value > 0:
         return f"[green]▲ {formatted}[/green]"
     if value < 0:
@@ -220,6 +220,7 @@ def print_summary_table(
     from ..models import BacktestResult  # noqa: lazy import
 
     import math
+    import rich.box
     from rich.console import Console
     from rich.table import Table
 
@@ -234,7 +235,7 @@ def print_summary_table(
         title_style="bold",
         show_lines=False,
         pad_edge=True,
-        box=__import__("rich.box", fromlist=["ROUNDED"]).ROUNDED,
+        box=rich.box.ROUNDED,
     )
 
     table.add_column("#", justify="right", style="dim", no_wrap=True)
@@ -381,8 +382,8 @@ def print_summary_table(
         total_return_sum = sum(t.return_pct for t in all_trades_combined)
         port_exp = (total_return_sum / total_trades) if total_trades else 0.0
 
-        port_avg_w = (sum(t.return_pct for t in port_wins) / len(port_wins)) if port_wins else 0.0
-        port_avg_l = (sum(t.return_pct for t in port_losses) / len(port_losses)) if port_losses else 0.0
+        port_avg_w = (gross_win / len(port_wins)) if port_wins else 0.0
+        port_avg_l = (-gross_loss / len(port_losses)) if port_losses else 0.0
 
         # Worst trade: MIN across all pairs
         port_worst = min((t.return_pct for t in all_trades_combined), default=0.0)
